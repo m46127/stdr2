@@ -37,7 +37,9 @@ def main():
             return
         
         # 在庫表のExcelファイルを読み込む
-        inventory_df = pd.read_excel(uploaded_file_excel, usecols='D')
+        inventory_df = pd.read_excel(uploaded_file_excel)
+        inventory_df = inventory_df[['商品コード']]
+
         inventory_df.columns = ['コード']
         inventory_df['コード'] = inventory_df['コード'].astype(str).str.strip().str.upper()
         
