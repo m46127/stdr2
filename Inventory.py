@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import base64
 import io
-import chardet  # 文字コード検出
+import chardet
 
 def get_binary_file_downloader_html(bin_file, file_label='File'):
     """ダウンロードリンクを生成するHTMLを返します。"""
@@ -17,7 +17,7 @@ def main():
     uploaded_file_excel = st.file_uploader("Excelファイル（在庫表）を選択", type="xlsx")
     
     if uploaded_file_csv is not None and uploaded_file_excel is not None:
-        # --- CSV(ピッキング)読み込み：文字コード検出＋dtype=strで先頭ゼロ保全 ---
+        # --- CSV(ピッキングリスト)の読み込み ---
         uploaded_file_csv.seek(0)
         raw_data = uploaded_file_csv.read()
         detected = chardet.detect(raw_data) or {}
@@ -30,7 +30,7 @@ def main():
             st.error(f"CSVの読み込みに失敗しました: {e}")
             return
 
-        # 必須列チェックと列名修正
+        # CSVファイルの列名を確認し、統一する
         if 'コード' in picking_df.columns:
             code_col_csv = 'コード'
         elif '商品コード' in picking_df.columns:
@@ -51,34 +51,46 @@ def main():
         # マージ用にCSVの列名を「コード」に統一
         picking_df.rename(columns={code_col_csv: 'コード'}, inplace=True)
 
-        # --- Excel(在庫表)読み込み：F列の6行目(F6)以降を「コード」として抽出 ---
+        # --- Excel(在庫表)の読み込み：元のレイアウトを維持 ---
         try:
-            # F列のみ読み込み（高速）
-            df_f = pd.read_excel(uploaded_file_excel, usecols="F", header=None, dtype=str)
+            # Excelの6行目（Pythonではインデックス5）をヘッダーとして読み込む
+            # これにより、元のExcelのすべての行が保持される
+            inventory_df = pd.read_excel(uploaded_file_excel, header=5)
         except Exception as e:
             st.error(f"Excelの読み込みに失敗しました: {e}")
             return
-
-        # pandasは0始まり。F6 以降 = 行インデックス 5 以降
-        inventory_df = df_f.iloc[5:].copy()
-        inventory_df.columns = ['コード']  # 1列だけなのでそのまま「コード」に
+        
+        # 'コード'または'商品コード'列を確実に取得
+        if 'コード' in inventory_df.columns:
+            code_col_excel = 'コード'
+        elif '商品コード' in inventory_df.columns:
+            code_col_excel = '商品コード'
+        else:
+            st.error("Excelの6行目に「コード」または「商品コード」列が見つかりません。レイアウトを確認してください。")
+            return
+        
+        # 列名を「コード」に統一
+        if code_col_excel != 'コード':
+            inventory_df.rename(columns={code_col_excel: 'コード'}, inplace=True)
+        
+        # 'コード'列を文字列に変換し、空白を削除して大文字に統一
         inventory_df['コード'] = inventory_df['コード'].astype(str).str.strip().str.upper()
         
-        # --- マージ ---
-        # `on='コード'`で結合し、`how='left'`でExcel側の全行を保持
+        # --- マージ処理 ---
+        # `how='left'`でExcelの全行を保持しながら、数量を結合
         merged_df = pd.merge(inventory_df, picking_df, on='コード', how='left')
-
-        # 0 → NaN → 空白（見た目を空に）
-        merged_df['数量'] = merged_df['数量'].replace(0, np.nan)
-        merged_df['数量'] = merged_df['数量'].astype(object).where(merged_df['数量'].notna(), '')
         
         # --- 最終的な出力データを作成 ---
         # 求められている「コード」と「数量」の2列のみに限定
         final_df = merged_df[['コード', '数量']].copy()
+        
+        # 数量がNaN（結合できなかった部分）を空白に置換
+        final_df['数量'] = final_df['数量'].fillna('')
 
-        # --- ダウンロード用Excel生成 ---
+        # --- ダウンロード用Excelの生成 ---
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 最終的なデータフレームを新しいExcelシートに出力
             final_df.to_excel(writer, sheet_name='Sheet1', index=False)
 
         st.markdown(get_binary_file_downloader_html(output.getvalue(), 'Merged_Inventory.xlsx'),
