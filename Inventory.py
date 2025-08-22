@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import base64
 import io
-import chardet  # 文字コード検出
+import chardet
 
 def get_binary_file_downloader_html(bin_file, file_label='File'):
     bin_str = base64.b64encode(bin_file).decode()
@@ -12,11 +12,11 @@ def get_binary_file_downloader_html(bin_file, file_label='File'):
 
 def main():
     st.title("Inventory Management System")
-    uploaded_file_csv = st.file_uploader("Choose a CSV file", type="csv")
-    uploaded_file_excel = st.file_uploader("Choose an Excel file", type="xlsx")
+    uploaded_file_csv = st.file_uploader("Choose a CSV file (Picking List)", type="csv")
+    uploaded_file_excel = st.file_uploader("Choose an Excel file (Inventory Sheet)", type="xlsx")
     
     if uploaded_file_csv is not None and uploaded_file_excel is not None:
-        # --- CSV(ピッキング)読み込み：文字コード検出＋dtype=strで先頭ゼロ保全 ---
+        # --- CSV(ピッキング)読み込み ---
         uploaded_file_csv.seek(0)
         raw_data = uploaded_file_csv.read()
         detected = chardet.detect(raw_data) or {}
@@ -29,14 +29,11 @@ def main():
             st.error(f"CSVの読み込みに失敗しました: {e}")
             return
 
-        # 必須列チェックと列名修正
-        # 'コード' または '商品コード' のどちらかが存在するかを確認
+        # CSV列名チェック
         if 'コード' in picking_df.columns:
-            code_col = 'コード'
+            code_col_csv = 'コード'
         elif '商品コード' in picking_df.columns:
-            code_col = '商品コード'
-            # Excelの列名に合わせるため、'商品コード'を'コード'にリネーム
-            picking_df.rename(columns={'商品コード': 'コード'}, inplace=True)
+            code_col_csv = '商品コード'
         else:
             st.error(f"CSVに「コード」または「商品コード」列が見つかりません。実際の列: {list(picking_df.columns)}")
             return
@@ -47,34 +44,31 @@ def main():
 
         # 数量を数値化して集計
         picking_df['数量'] = pd.to_numeric(picking_df['数量'], errors='coerce').fillna(0)
-        picking_df = picking_df.groupby('コード', as_index=False)['数量'].sum()
-        picking_df['コード'] = picking_df['コード'].astype(str).str.strip().str.upper()
+        picking_df = picking_df.groupby(code_col_csv, as_index=False)['数量'].sum()
+        picking_df[code_col_csv] = picking_df[code_col_csv].astype(str).str.strip().str.upper()
+        
+        # マージ用にCSVの列名を統一
+        picking_df.rename(columns={code_col_csv: 'コード'}, inplace=True)
 
-        # --- Excel(在庫表)読み込み：F列の6行目(F6)以降を「コード」として抽出 ---
-        # すべてをヘッダー無しで読み込む or F列のみ読み込む、どちらでもOK
+        # --- Excel(在庫表)読み込み：元のレイアウトを維持 ---
         try:
-            # F列のみ読み込み（高速）
-            df_f = pd.read_excel(uploaded_file_excel, usecols="F", header=None, dtype=str)
+            # header=5で6行目をヘッダーとして読み込む
+            inventory_df = pd.read_excel(uploaded_file_excel, header=5, dtype=str)
         except Exception as e:
             st.error(f"Excelの読み込みに失敗しました: {e}")
             return
-
-        # pandasは0始まり。F6 以降 = 行インデックス 5 以降
-        inventory_df = df_f.iloc[5:].copy()
-        inventory_df.columns = ['コード']  # 1列だけなのでそのまま「コード」に
-        inventory_df['コード'] = inventory_df['コード'].astype(str).str.strip().str.upper()
-        # 空セル/NaN除去
-        inventory_df = inventory_df.dropna(subset=['コード'])
-        inventory_df = inventory_df[inventory_df['コード'] != '']  # 空文字除外
-        inventory_df = inventory_df.reset_index(drop=True)
-
-        if inventory_df.empty:
-            st.error("ExcelのF6以降に商品コードが見つかりません。レイアウトをご確認ください。")
+        
+        # 'コード'列を確実に取得
+        if 'コード' not in inventory_df.columns:
+            st.error("Excelの6行目に「コード」列が見つかりません。レイアウトを確認してください。")
             return
-
-        # --- マージ ---
+        
+        # 'コード'列の処理
+        inventory_df['コード'] = inventory_df['コード'].astype(str).str.strip().str.upper()
+        
+        # --- マージ処理 ---
         merged_df = pd.merge(inventory_df, picking_df, on='コード', how='left')
-
+        
         # 0 → NaN → 空白（見た目を空に）
         merged_df['数量'] = merged_df['数量'].replace(0, np.nan)
         merged_df['数量'] = merged_df['数量'].astype(object).where(merged_df['数量'].notna(), '')
