@@ -55,8 +55,8 @@ def main():
 
         # --- Excel(在庫表)の読み込み ---
         try:
-            # header=Noneで全行を読み込むことで、レイアウトを完璧に維持する
-            inventory_df_raw = pd.read_excel(uploaded_file_excel, header=None)
+            # ExcelファイルをCSVとして読み込むことで、より正確に処理
+            inventory_df_raw = pd.read_csv(uploaded_file_excel, header=None, dtype=str)
         except Exception as e:
             st.error(f"Excelの読み込みに失敗しました: {e}")
             return
@@ -76,15 +76,15 @@ def main():
             st.error("Excelの6行目に「コード」または「商品コード」列が見つかりません。")
             return
         
-        # 'コード'列を文字列に変換し、空白を削除して大文字に統一
-        inventory_df[code_col_excel] = inventory_df[code_col_excel].astype(str).str.strip().str.upper()
-        
         # --- 行の再結合ロジック ---
         # 「コード」列が空の行を特定し、直前の行のコードで埋める
         inventory_df[code_col_excel] = inventory_df[code_col_excel].replace('', np.nan)
         inventory_df[code_col_excel].ffill(inplace=True)
         inventory_df[code_col_excel] = inventory_df[code_col_excel].fillna('') # NaNを再度空文字に戻す
-        
+
+        # 'コード'列を文字列に変換し、空白を削除して大文字に統一
+        inventory_df[code_col_excel] = inventory_df[code_col_excel].astype(str).str.strip().str.upper()
+
         # --- 最終的な出力データを作成 ---
         final_df = pd.DataFrame()
         final_df['コード'] = inventory_df[code_col_excel].copy()
