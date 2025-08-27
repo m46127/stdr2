@@ -61,7 +61,7 @@ def main():
             st.error(f"Excelの読み込みに失敗しました: {e}")
             return
             
-        # 6行目を新しいヘッダーとして設定し、5行目以降のデータフレームを作成
+        # 6行目を新しいヘッダーとして設定し、7行目以降のデータフレームを作成
         header_row = inventory_df_raw.iloc[5]
         inventory_df = inventory_df_raw[6:].copy()
         inventory_df.columns = header_row
@@ -76,23 +76,25 @@ def main():
             st.error("Excelの6行目に「コード」または「商品コード」列が見つかりません。")
             return
         
-        # 列名を「コード」に統一
-        if code_col_excel != 'コード':
-            inventory_df.rename(columns={code_col_excel: 'コード'}, inplace=True)
-        
         # 'コード'列を文字列に変換し、空白を削除して大文字に統一
-        inventory_df['コード'] = inventory_df['コード'].astype(str).str.strip().str.upper()
+        inventory_df[code_col_excel] = inventory_df[code_col_excel].astype(str).str.strip().str.upper()
+        
+        # --- 行の再結合ロジック ---
+        # 「コード」列が空の行を特定し、直前の行のコードで埋める
+        inventory_df[code_col_excel] = inventory_df[code_col_excel].replace('', np.nan)
+        inventory_df[code_col_excel].ffill(inplace=True)
+        inventory_df[code_col_excel] = inventory_df[code_col_excel].fillna('') # NaNを再度空文字に戻す
         
         # --- 最終的な出力データを作成 ---
         final_df = pd.DataFrame()
-        final_df['コード'] = inventory_df['コード'].copy()
+        final_df['コード'] = inventory_df[code_col_excel].copy()
         
         # Excelの「コード」列をキーに、ピッキングリストの「数量」をマッピング
         final_df['数量'] = final_df['コード'].map(picking_dict)
 
         # 数量がNaN（マッピングできなかった部分）を空白に置換
         final_df['数量'] = final_df['数量'].fillna('')
-
+        
         # --- ダウンロード用Excelの生成 ---
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
